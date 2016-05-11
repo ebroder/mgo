@@ -3554,6 +3554,40 @@ func (iter *Iter) Close() error {
 	return err
 }
 
+// Done returns true if there will never be more results from this
+// cursor, and false if it's possible that there will be more
+// results. For a standard (non-tailing) query, this returns false if
+// calling Next would return true. For tailable cursors, it's somewhat
+// more complicated - this may return false even if there are no
+// immediate results, so long as there might be results later.
+//
+// If the Iter is waiting for results from the server, Done may
+// block.
+func (iter *Iter) Done() bool {
+	iter.m.Lock()
+	defer iter.m.Unlock()
+
+	for {
+		if iter.docData.Len() > 0 {
+			return false
+		}
+
+		if iter.err != nil {
+			return true
+		}
+
+		// If we're waiting for a reply from an in-flight
+		// query, wait until we know whether or not there's
+		// still a cursor ID.
+		if iter.docsToReceive > 0 {
+			iter.gotReply.Wait()
+			continue
+		}
+
+		return iter.op.cursorId == 0
+	}
+}
+
 // Timeout returns true if Next returned false due to a timeout of
 // a tailable cursor. In those cases, Next may be called again to continue
 // the iteration at the previous cursor position.
